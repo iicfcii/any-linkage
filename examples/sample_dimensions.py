@@ -3,6 +3,7 @@ import networkx as nx
 import matplotlib.pyplot as plt
 from any_linkage.topology import load, gen_graph
 from any_linkage.dimensions import gen_constraints, get_point_keys, populate, fk, plot
+from any_linkage.plotter import Plotter
 
 
 def main():
@@ -54,7 +55,7 @@ def main():
     q = torch.stack([axis.flatten() for axis in grid]).T
     # Accomodate the batch dimension for designs.
     # This allows differnt input ranges for different designs if needed.
-    q = q.unsqueeze(0)
+    q = q.expand(n_designs, -1, -1)
 
     # Populate the constraints with values calculated from sampled designs.
     c = populate(p0, c)
@@ -75,19 +76,7 @@ def main():
     print("cos_theta_p_max", cos_theta_p_max)
     print("cos_mu_max", cos_mu_max)
 
-    plt.figure(figsize=(8, 4))
-    plt.subplots_adjust(
-        left=0, right=1, top=1, bottom=0,
-        wspace=0, hspace=0,
-    )
-    for q_index in range(q.shape[1]):
-        for d_index in range(n_designs):
-            plt.subplot(1, 2, d_index + 1)
-            plt.cla()
-            plot(p, c, d_index, q_index)
-            plt.xlim(-200, 200)
-            plt.ylim(-200, 200)
-        plt.pause(0.2)
+    Plotter(q, p, c, (-200, -200, 400, 400))
     plt.show()
 
 
