@@ -55,14 +55,14 @@ def main():
     q = torch.stack([axis.flatten() for axis in grid]).T
     # Accomodate the batch dimension for designs.
     # This allows differnt input ranges for different designs if needed.
-    q = q.expand(n_designs, -1, -1)
+    q = q.expand(n_designs, *q.shape)
 
     # Populate the constraints with values calculated from sampled designs.
     c = populate(p0, c)
 
     # Calculate forward kinematics.
-    # The inputs are also treated as a batch dimension.
-    # The returned data has batch dimensions of n_designs x n_qs.
+    # The q combinations are also treated as a batch dimension.
+    # The returned data has batch dimensions of n_designs x n_q_combs.
     p, cos_theta, cos_theta_p, cos_mu = fk(q, p0, c)
 
     # Random dimensions may result in kinematically infeasible designs,

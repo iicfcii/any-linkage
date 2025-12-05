@@ -6,11 +6,24 @@ from any_linkage.dimensions import plot
 
 
 class Plotter:
-    def __init__(self, q, p, c, bbox):
-        self.q = q
-        self.p = p
-        self.c = c
+    def __init__(
+        self,
+        q, p, c, bbox,
+        on_plotted=None,
+        on_design_changed=None,
+    ):
+        self.q = q.detach().cpu().numpy()
+        self.p = {}
+        for k, v in p.items():
+            self.p[k] = v.detach().cpu().numpy()
+        self.c = [
+            _c[:4] + [_c[4].detach().cpu().numpy(), _c[5].detach().cpu().numpy()]
+            for _c in c
+        ]
+
         self.bbox = bbox
+        self.on_plotted = on_plotted
+        self.on_design_changed = on_design_changed
 
         self.n_designs = self.q.shape[0]
         self.n_qs = self.q.shape[-1]
@@ -47,7 +60,7 @@ class Plotter:
         self.d_index = val
         steps = []
         for i in range(self.n_qs):
-            steps.append(torch.unique(self.q[self.d_index, :, i]).numpy())
+            steps.append(np.unique(self.q[self.d_index, :, i]))
         self.q_sliders = []
         for i in range(self.n_qs):
             plt.sca(self.axes_ctrl[i])
@@ -67,6 +80,9 @@ class Plotter:
             self.q_sliders.append(slider)
         self.draw()
 
+        if self.on_design_changed is not None:
+            self.on_design_changed(self.d_index, self.q_index)
+
     def on_q_slider_changed(self, val):
         qi = np.array([slider.val for slider in self.q_sliders])
         self.q_index = np.argmin(np.linalg.norm(
@@ -78,6 +94,8 @@ class Plotter:
         plt.sca(self.ax)
         plt.cla()
         plot(self.p, self.c, self.d_index, self.q_index)
+        if self.on_plotted is not None:
+            self.on_plotted(self.d_index, self.q_index)
         plt.xlim(self.bbox[0], self.bbox[0] + self.bbox[2])
         plt.ylim(self.bbox[1], self.bbox[1] + self.bbox[3])
         plt.draw()

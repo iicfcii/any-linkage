@@ -203,10 +203,10 @@ def fk(q, p0, c):
 def plot(p, c, d_index, q_index, label_dimensions=False):
     _p = {}
     for k, v in p.items():
-        _p[k] = v[d_index][q_index].detach().cpu().numpy()
+        _p[k] = v[d_index][q_index]
     p = _p
     c = [
-        _c[:4] + [_c[4][d_index].item(), _c[5][d_index].item()]
+        _c[:4] + [_c[4][d_index], _c[5][d_index]]
         for _c in c
     ]
 
