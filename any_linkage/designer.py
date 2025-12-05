@@ -27,7 +27,7 @@ class Design(ABC):
         raise NotImplementedError
 
     def eval(self):
-        self.loss, self.p, self.c = self._eval()
+        self.loss, self.loss_weighted, self.p, self.c = self._eval()
         return self.loss
 
     def plot(self):
@@ -39,6 +39,8 @@ class Design(ABC):
             _c[:4] + [_c[4][indices], _c[5][indices]]
             for _c in self.c
         ]
+        self.loss = self.loss[indices]
+        self.loss_weighted = self.loss_weighted[indices]
 
         self.plotter = Plotter(
             self.q, self.p, self.c,
