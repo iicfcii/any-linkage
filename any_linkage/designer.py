@@ -8,6 +8,9 @@ import numpy as np
 from any_linkage.plotter import Plotter
 
 
+torch.set_float32_matmul_precision("high")
+
+
 class Design(ABC):
     @staticmethod
     @abstractmethod
@@ -126,7 +129,7 @@ def load(path):
 def _sweep_fun(Design, plan_index, name, optimize_kwargs):
     design = Design(plan_index)
     optimize(design, id=plan_index, **optimize_kwargs)
-    save("logs", design, name)
+    save(design, "logs", name)
 
 
 def sweep(Design, name="design", processes=1, optimize_kwargs={}):

@@ -46,7 +46,7 @@ class OneDoFLegDesign(designer.Design):
         self.cos_max = torch.tensor(0.8).to(self.device)
         self.output_clearance_min = torch.tensor(20).to(self.device)
         self.joint_clearace_min = torch.tensor(20).to(self.device)
-        self.joint_x_max = torch.tensor(100).to(self.device)
+        self.joint_x_max = torch.tensor(50).to(self.device)
 
         self.weights = torch.tensor([1, 0.001, 1000, 1, 1, 1]).to(self.device)
 
@@ -185,8 +185,8 @@ class OneDoFLegDesign(designer.Design):
     def _on_plotted(self, d_index, q_index):
         p_output = self.p[self.output_key][d_index].detach().cpu().numpy()
         p_output_d = self.p_output_d.detach().cpu().numpy()
-        plt.plot(p_output[:, 0], p_output[:, 1], 'b', lw=1)
-        plt.plot(p_output_d[:, 0], p_output_d[:, 1], 'g', lw=1)
+        plt.plot(p_output[:, 0], p_output[:, 1], '.-b', lw=1)
+        plt.plot(p_output_d[:, 0], p_output_d[:, 1], '.-g', lw=1)
 
     def _on_design_changed(self, d_index, q_index):
         print(

@@ -34,7 +34,7 @@ class Plotter:
 
         self.fig_ctrl, self.axes_ctrl = plt.subplots(
             self.n_qs + 2, 1,
-            num="ctrl", figsize=(4, 4),
+            num="ctrl", figsize=(8, 8),
         )
         self.fig_ctrl.subplots_adjust(
             left=0.2, right=0.8, top=0.9, bottom=0.1,
@@ -64,7 +64,7 @@ class Plotter:
         )
         self.label_slider.on_changed(self.on_label_slider_changed)
 
-        self.fig, self.ax = plt.subplots(num="design", figsize=(4, 4))
+        self.fig, self.ax = plt.subplots(num="design", figsize=(8, 8))
         self.fig.subplots_adjust(left=0, right=1, top=1, bottom=0)
 
         self.on_design_slider_changed(self.d_index)
