@@ -76,7 +76,7 @@ def main():
     print("cos_theta_p_max", cos_theta_p_max)
     print("cos_mu_max", cos_mu_max)
 
-    Plotter(q, p, c, (-200, -200, 400, 400))
+    plotter = Plotter(q, p, c, (-200, -200, 400, 400))
     plt.show()
 
 

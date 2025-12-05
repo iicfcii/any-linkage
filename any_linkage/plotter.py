@@ -30,9 +30,10 @@ class Plotter:
 
         self.d_index = 0
         self.q_index = 0
+        self.label_dimensions = False
 
         self.fig_ctrl, self.axes_ctrl = plt.subplots(
-            self.n_qs + 1, 1,
+            self.n_qs + 2, 1,
             num="ctrl", figsize=(4, 4),
         )
         self.fig_ctrl.subplots_adjust(
@@ -40,7 +41,7 @@ class Plotter:
         )
 
         self.design_slider = Slider(
-            self.axes_ctrl[-1],
+            self.axes_ctrl[-2],
             f"d",
             valmin=0,
             valmax=self.n_designs - 1,
@@ -50,6 +51,18 @@ class Plotter:
             initcolor="none",
         )
         self.design_slider.on_changed(self.on_design_slider_changed)
+
+        self.label_slider = Slider(
+            self.axes_ctrl[-1],
+            f"l",
+            valmin=0,
+            valmax=1,
+            valinit=0,
+            valstep=[0, 1],
+            orientation="horizontal",
+            initcolor="none",
+        )
+        self.label_slider.on_changed(self.on_label_slider_changed)
 
         self.fig, self.ax = plt.subplots(num="design", figsize=(4, 4))
         self.fig.subplots_adjust(left=0, right=1, top=1, bottom=0)
@@ -83,6 +96,13 @@ class Plotter:
         if self.on_design_changed is not None:
             self.on_design_changed(self.d_index, self.q_index)
 
+    def on_label_slider_changed(self, val):
+        if val == 0:
+            self.label_dimensions = False
+        else:
+            self.label_dimensions = True
+        self.draw()
+
     def on_q_slider_changed(self, val):
         qi = np.array([slider.val for slider in self.q_sliders])
         self.q_index = np.argmin(np.linalg.norm(
@@ -93,7 +113,11 @@ class Plotter:
     def draw(self):
         plt.sca(self.ax)
         plt.cla()
-        plot(self.p, self.c, self.d_index, self.q_index)
+        plot(
+            self.p, self.c,
+            self.d_index, self.q_index,
+            label_dimensions=self.label_dimensions,
+        )
         if self.on_plotted is not None:
             self.on_plotted(self.d_index, self.q_index)
         plt.xlim(self.bbox[0], self.bbox[0] + self.bbox[2])
