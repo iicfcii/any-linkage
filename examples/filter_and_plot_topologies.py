@@ -11,18 +11,24 @@ def main():
     for plan in plans:
         g = gen_graph(plan)
         n_motors = len([
-            e
-            for e in g.edges
+            e for e in g.edges
             if g[e[0]][e[1]]["type"] == "m"
         ])
         n_links = len(g.nodes)
         n_links_to_output = nx.shortest_path_length(
             g, list(g.nodes)[0], list(g.nodes)[-1]
         )
+        n_ground_joints = len(g.edges(0))
+        n_ground_motors = len([
+            e for e in g.edges(0)
+            if g[e[0]][e[1]]["type"] == "m"
+        ])
         if (
             n_motors <= 2 and
             n_links <= 5 and
-            n_links_to_output >= 2
+            n_links_to_output >= 2 and
+            n_ground_joints > 0 and
+            n_ground_motors > 0
         ):
             filtered_plans.append(plan)
 

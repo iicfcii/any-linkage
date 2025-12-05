@@ -16,8 +16,7 @@ class TwoDoFSerialLegDesign(designer.Design):
         for plan in plans:
             g = topology.gen_graph(plan)
             n_motors = len([
-                e
-                for e in g.edges
+                e for e in g.edges
                 if g[e[0]][e[1]]["type"] == "m"
             ])
             n_links = len(g.nodes)
@@ -47,10 +46,9 @@ class TwoDoFSerialLegDesign(designer.Design):
 
         self.cos_max = torch.tensor(0.8).to(self.device)
         self.output_clearance_min = torch.tensor(20).to(self.device)
-        self.joint_clearace_min = torch.tensor(20).to(self.device)
         self.joint_x_max = torch.tensor(50).to(self.device)
 
-        self.weights = torch.tensor([1, 0.001, 1000, 1, 1, 1]).to(self.device)
+        self.weights = torch.tensor([1, 0.001, 1000, 1, 1]).to(self.device)
 
         self.p0 = {}
         for key in dimensions.get_point_keys(self.c_empty):
@@ -167,26 +165,6 @@ class TwoDoFSerialLegDesign(designer.Design):
             output_clearance, -self.output_clearance_min,
         ) - -self.output_clearance_min
 
-        joint_clearance = []
-        for joints_of_link in self.joints_of_links:
-            _p = torch.stack(
-                [self.p0[joint] for joint in joints_of_link],
-                dim=1,
-            )
-            length = torch.linalg.norm(
-                _p.unsqueeze(2) - _p.unsqueeze(1),
-                dim=-1,
-            )
-            offset = torch.eye(
-                length.shape[-1],
-            ).to(self.device) * self.joint_clearace_min
-            joint_clearance.append(torch.amin(length + offset, dim=(-1, -2)))
-        joint_clearance = torch.stack(joint_clearance, dim=0).T
-        joint_clearance = -torch.amin(joint_clearance, dim=1)
-        loss_joint_clearance = torch.maximum(
-            joint_clearance, -self.joint_clearace_min,
-        ) - -self.joint_clearace_min
-
         p_all = torch.cat([p_other, p_output.unsqueeze(-2)], dim=2)
         joint_x = torch.amax(torch.abs(p_all[:, :, :, 0]), dim=(1, 2))
         loss_joint_x = torch.maximum(
@@ -199,7 +177,6 @@ class TwoDoFSerialLegDesign(designer.Design):
                 loss_total_link_length,
                 loss_cos_max,
                 loss_output_clearance,
-                loss_joint_clearance,
                 loss_joint_x,
             ],
             dim=1,
@@ -223,8 +200,7 @@ class TwoDoFSerialLegDesign(designer.Design):
             f"l_tll: {self.loss_weighted[d_index][1]:.4f}, "
             f"l_cos: {self.loss_weighted[d_index][2]:.4f}, "
             f"l_oc: {self.loss_weighted[d_index][3]:.4f}, "
-            f"l_jc: {self.loss_weighted[d_index][4]:.4f}, "
-            f"l_jx: {self.loss_weighted[d_index][5]:.4f}"
+            f"l_jx: {self.loss_weighted[d_index][4]:.4f}"
         )
 
 
