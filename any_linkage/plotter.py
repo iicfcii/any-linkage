@@ -1,5 +1,4 @@
 import numpy as np
-import torch
 import matplotlib.pyplot as plt
 from matplotlib.widgets import Slider
 from any_linkage.dimensions import plot
@@ -34,7 +33,7 @@ class Plotter:
 
         self.fig_ctrl, self.axes_ctrl = plt.subplots(
             self.n_qs + 2, 1,
-            num="ctrl", figsize=(8, 8),
+            num="ctrl", figsize=(6, 6),
         )
         self.fig_ctrl.subplots_adjust(
             left=0.2, right=0.8, top=0.9, bottom=0.1,
@@ -64,13 +63,14 @@ class Plotter:
         )
         self.label_slider.on_changed(self.on_label_slider_changed)
 
-        self.fig, self.ax = plt.subplots(num="design", figsize=(8, 8))
+        self.fig, self.ax = plt.subplots(num="design", figsize=(6, 6))
         self.fig.subplots_adjust(left=0, right=1, top=1, bottom=0)
 
         self.on_design_slider_changed(self.d_index)
 
     def on_design_slider_changed(self, val):
         self.d_index = val
+        self.q_index = 0
         steps = []
         for i in range(self.n_qs):
             steps.append(np.unique(self.q[self.d_index, :, i]))

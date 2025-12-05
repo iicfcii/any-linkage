@@ -1,5 +1,6 @@
 import sys
 import torch
+import numpy as np
 import networkx as nx
 import matplotlib.pyplot as plt
 import any_linkage.topology as topology
@@ -7,7 +8,7 @@ import any_linkage.dimensions as dimensions
 import any_linkage.designer as designer
 
 
-class OneDoFLegDesign(designer.Design):
+class TwoDoFSerialLegDesign(designer.Design):
     def plans():
         plans = topology.load()
 
@@ -23,10 +24,12 @@ class OneDoFLegDesign(designer.Design):
             n_links_to_output = nx.shortest_path_length(
                 g, list(g.nodes)[0], list(g.nodes)[-1]
             )
+            n_ground_joints = len(g.edges(0))
             if (
-                n_motors == 1 and
-                n_links <= 6 and
-                n_links_to_output >= 2
+                n_motors == 2 and
+                n_links <= 7 and
+                n_links_to_output >= 2 and
+                n_ground_joints == 1
             ):
                 filtered_plans.append(plan)
         return filtered_plans
@@ -35,7 +38,7 @@ class OneDoFLegDesign(designer.Design):
         super().__init__(plan_index, seed=seed, device=device)
         self.plotter_bbox = (-200, -300, 400, 400)
 
-        self.plan = OneDoFLegDesign.plans()[self.plan_index]
+        self.plan = TwoDoFSerialLegDesign.plans()[self.plan_index]
         self.c_empty = dimensions.gen_constraints(self.plan)
         self.origin_key = dimensions.origin_key
         self.output_key = dimensions.get_output_key(self.c_empty)
@@ -58,11 +61,24 @@ class OneDoFLegDesign(designer.Design):
             self.params.append(p)
             self.p0[key] = p
 
-        self.q = torch.linspace(-1, 1, 9).unsqueeze(-1)
+        grid = torch.meshgrid(
+            torch.linspace(-1, 1, 9),
+            torch.linspace(-1, 1, 9),
+            indexing="ij",
+        )
+        self.q = torch.stack([axis.flatten() for axis in grid]).T
 
-        jac = 50
+        jac = torch.tensor([
+            [1.0, 0.0],
+            [0.0, 50.0],
+        ])
+        polar = (
+            torch.matmul(jac, self.q.unsqueeze(-1)).squeeze(-1) +
+            torch.tensor([-np.pi / 2, 150.0])  # [phi, r]
+        )
         self.p_output_d = torch.zeros([self.q.shape[0], 2]).to(self.device)
-        self.p_output_d[:, 1] = self.q.squeeze(-1) * jac - 150
+        self.p_output_d[:, 0] = polar[:, 1] * torch.cos(polar[:, 0])
+        self.p_output_d[:, 1] = polar[:, 1] * torch.sin(polar[:, 0])
 
         self.q = self.q.expand(self.n_designs, *self.q.shape).to(self.device)
 
@@ -115,17 +131,34 @@ class OneDoFLegDesign(designer.Design):
         total_link_length = torch.sum(centroid_link_length, dim=1)
         loss_total_link_length = total_link_length
 
-        cos = torch.cat([cos_theta, cos_theta_p, cos_mu], dim=1)
-        cos = torch.amax(torch.abs(cos), dim=(1, 2))
-        loss_cos_max = torch.maximum(
-            cos, self.cos_max,
-        ) - self.cos_max
+        if cos_theta is None:
+            loss_cos_max = torch.zeros(self.n_designs, device=self.device)
+        else:
+            cos = torch.cat([cos_theta, cos_theta_p, cos_mu], dim=1)
+            cos = torch.amax(torch.abs(cos), dim=(1, 2))
+            loss_cos_max = torch.maximum(
+                cos, self.cos_max,
+            ) - self.cos_max
 
         p_other = torch.stack(
             [v for k, v in p.items() if k != self.output_key],
             dim=2,
         )
         p_output = p[self.output_key]
+        angle = (
+            -torch.atan2(p_output[:, :, 1], p_output[:, :, 0]) +
+            -np.pi / 2
+        )
+        rot = torch.stack([
+            torch.cos(angle), -torch.sin(angle),
+            torch.sin(angle), torch.cos(angle)
+        ], dim=2).reshape(*angle.shape, 2, 2)
+        p_other = torch.matmul(
+            rot.unsqueeze(2), p_other.unsqueeze(-1),
+        ).squeeze(-1)
+        p_output = torch.matmul(
+            rot, p_output.unsqueeze(-1),
+        ).squeeze(-1)
         output_clearance = (
             p_output[:, :, 1] - torch.amin(p_other[:, :, :, 1], dim=-1)
         )
@@ -154,7 +187,7 @@ class OneDoFLegDesign(designer.Design):
             joint_clearance, -self.joint_clearace_min,
         ) - -self.joint_clearace_min
 
-        p_all = torch.stack([v for k, v in p.items()], dim=2)
+        p_all = torch.cat([p_other, p_output.unsqueeze(-2)], dim=2)
         joint_x = torch.amax(torch.abs(p_all[:, :, :, 0]), dim=(1, 2))
         loss_joint_x = torch.maximum(
             joint_x, self.joint_x_max,
@@ -179,8 +212,8 @@ class OneDoFLegDesign(designer.Design):
     def _on_plotted(self, d_index, q_index):
         p_output = self.p[self.output_key][d_index].detach().cpu().numpy()
         p_output_d = self.p_output_d.detach().cpu().numpy()
-        plt.plot(p_output[:, 0], p_output[:, 1], '.-b', lw=1)
-        plt.plot(p_output_d[:, 0], p_output_d[:, 1], '.-g', lw=1)
+        plt.plot(p_output[:, 0], p_output[:, 1], '.b', lw=1)
+        plt.plot(p_output_d[:, 0], p_output_d[:, 1], '.g', lw=1)
 
     def _on_design_changed(self, d_index, q_index):
         print(
@@ -198,19 +231,22 @@ class OneDoFLegDesign(designer.Design):
 def main():
     if sys.argv[1] == "t":
         plan_index = int(sys.argv[2])
-        design = OneDoFLegDesign(plan_index)
+        design = TwoDoFSerialLegDesign(plan_index)
         design.eval()
         design.plot()
         plt.show()
 
     if sys.argv[1] == "o":
         plan_index = int(sys.argv[2])
-        design = OneDoFLegDesign(plan_index)
+        design = TwoDoFSerialLegDesign(plan_index)
         designer.optimize(design, id=plan_index)
-        designer.save(design, "logs", name="one_dof_leg")
+        designer.save(design, "logs", name="two_dof_serial_leg")
 
     if sys.argv[1] == "s":
-        designer.sweep(OneDoFLegDesign, name="one_dof_leg", processes=2)
+        designer.sweep(
+            TwoDoFSerialLegDesign,
+            name="two_dof_serial_leg", processes=2,
+        )
 
     if sys.argv[1] == "p":
         path = sys.argv[2]

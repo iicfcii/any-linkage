@@ -75,7 +75,6 @@ def optimize(
         # Not using torch.compile on Windows because it is not well supported.
         # torch.compile can significantly speed up the optimization.
         eval = design.eval
-        pass
 
     t0 = time.time()
     for i in range(n_steps + 1):
