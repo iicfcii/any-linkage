@@ -36,8 +36,8 @@ class TwoDoFParallelLegDesign(designer.Design):
                 filtered_plans.append(plan)
         return filtered_plans
 
-    def __init__(self, plan_index, seed=0, device="cuda"):
-        super().__init__(plan_index, seed=seed, device=device)
+    def __init__(self, plan_index, seed=0):
+        super().__init__(plan_index, seed=seed)
         self.plotter_bbox = (-200, -300, 400, 400)
 
         self.plan = TwoDoFParallelLegDesign.plans()[self.plan_index]

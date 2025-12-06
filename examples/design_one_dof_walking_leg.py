@@ -57,7 +57,7 @@ class OneDoFWalkingLegDesign(designer.Design):
             self.params.append(p)
             self.p0[key] = p
 
-        self.q = torch.linspace(-np.pi, np.pi, 21)[:-1].unsqueeze(-1)
+        self.q = torch.linspace(-np.pi, np.pi, 51)[:-1].unsqueeze(-1)
         self.q = self.q.expand(self.n_designs, *self.q.shape).to(self.device)
 
         self.p_output_d = torch.zeros([11, 2])

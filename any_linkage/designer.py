@@ -17,10 +17,16 @@ class Design(ABC):
     def plans():
         raise NotImplementedError
 
-    def __init__(self, plan_index, seed=0, device="cuda"):
+    def __init__(self, plan_index, seed=None, device=None):
         self.seed = seed
         torch.manual_seed(seed)
-        self.device = device
+        if device is None:
+            if torch.cuda.is_available():
+                self.device = "cuda"
+            else:
+                self.device = "cpu"
+        else:
+            self.device = device
         self.plan_index = plan_index
         self.params = []
         self.plotter_bbox = (-100, -100, 200, 200)
