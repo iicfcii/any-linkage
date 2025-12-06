@@ -7,7 +7,7 @@ import any_linkage.dimensions as dimensions
 import any_linkage.designer as designer
 
 
-class OneDoFLegDesign(designer.Design):
+class OneDoFLinearLegDesign(designer.Design):
     def plans():
         plans = topology.load()
 
@@ -34,7 +34,7 @@ class OneDoFLegDesign(designer.Design):
         super().__init__(plan_index, seed=seed, device=device)
         self.plotter_bbox = (-200, -300, 400, 400)
 
-        self.plan = OneDoFLegDesign.plans()[self.plan_index]
+        self.plan = OneDoFLinearLegDesign.plans()[self.plan_index]
         self.c_empty = dimensions.gen_constraints(self.plan)
         self.origin_key = dimensions.origin_key
         self.output_key = dimensions.get_output_key(self.c_empty)
@@ -168,19 +168,23 @@ class OneDoFLegDesign(designer.Design):
 def main():
     if sys.argv[1] == "t":
         plan_index = int(sys.argv[2])
-        design = OneDoFLegDesign(plan_index)
+        design = OneDoFLinearLegDesign(plan_index)
         design.eval()
         design.plot()
         plt.show()
 
     if sys.argv[1] == "o":
         plan_index = int(sys.argv[2])
-        design = OneDoFLegDesign(plan_index)
+        design = OneDoFLinearLegDesign(plan_index)
         designer.optimize(design, id=plan_index)
-        designer.save(design, "logs", name="one_dof_leg")
+        designer.save(design, "logs", name="one_dof_linear_leg")
 
     if sys.argv[1] == "s":
-        designer.sweep(OneDoFLegDesign, name="one_dof_leg", processes=2)
+        designer.sweep(
+            OneDoFLinearLegDesign,
+            name="one_dof_linear_leg",
+            processes=2,
+        )
 
     if sys.argv[1] == "p":
         path = sys.argv[2]
