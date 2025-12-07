@@ -56,12 +56,13 @@ class OneDoFLinearLegDesign(designer.Design):
             self.params.append(p)
             self.p0[key] = p
 
-        self.q = torch.linspace(-1, 1, 9).unsqueeze(-1)
+        y = torch.linspace(-200, -100, 9)
+        self.p_output_d = torch.zeros([y.shape[0], 2]).to(self.device)
+        self.p_output_d[:, 1] = y
 
-        jac = 50
-        self.p_output_d = torch.zeros([self.q.shape[0], 2]).to(self.device)
-        self.p_output_d[:, 1] = self.q.squeeze(-1) * jac - 150
-
+        jac = 50.0
+        self.q = 1 / jac * y.unsqueeze(-1)
+        self.q = self.q - torch.mean(self.q, dim=0)
         self.q = self.q.expand(self.n_designs, *self.q.shape).to(self.device)
 
         self.g = topology.gen_graph(self.plan)

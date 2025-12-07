@@ -71,20 +71,19 @@ class Plotter:
     def on_design_slider_changed(self, val):
         self.d_index = val
         self.q_index = 0
-        steps = []
-        for i in range(self.n_qs):
-            steps.append(np.unique(self.q[self.d_index, :, i]))
         self.q_sliders = []
         for i in range(self.n_qs):
+            qi_rounded = np.round(self.q[self.d_index, :, i], 6)
+            step = np.unique(qi_rounded)
             plt.sca(self.axes_ctrl[i])
             plt.cla()
             slider = Slider(
                 self.axes_ctrl[i],
                 f"q{i}",
-                valmin=np.amin(steps[i]),
-                valmax=np.amax(steps[i]),
-                valinit=np.amin(steps[i]),
-                valstep=steps[i],
+                valmin=np.amin(step),
+                valmax=np.amax(step),
+                valinit=qi_rounded[self.q_index],
+                valstep=step,
                 valfmt="%.2f",
                 orientation="horizontal",
                 initcolor="none",
@@ -105,10 +104,11 @@ class Plotter:
 
     def on_q_slider_changed(self, val):
         qi = np.array([slider.val for slider in self.q_sliders])
-        self.q_index = np.argmin(np.linalg.norm(
-            self.q[self.d_index] - qi, axis=-1,
-        ))
-        self.draw()
+        q_error = np.linalg.norm(self.q[self.d_index] - qi, axis=-1)
+        q_index = np.argmin(q_error)
+        if q_error[q_index] < 1e-6:
+            self.q_index = q_index
+            self.draw()
 
     def draw(self):
         plt.sca(self.ax)

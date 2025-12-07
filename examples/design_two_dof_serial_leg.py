@@ -60,24 +60,23 @@ class TwoDoFSerialLegDesign(designer.Design):
             self.p0[key] = p
 
         grid = torch.meshgrid(
-            torch.linspace(-1, 1, 9),
-            torch.linspace(-1, 1, 9),
+            torch.linspace(-1, 1, 9) - np.pi / 2,
+            torch.linspace(200, 100, 9),
             indexing="ij",
         )
-        self.q = torch.stack([axis.flatten() for axis in grid]).T
+        polar = torch.stack([axis.flatten() for axis in grid]).T
+        self.p_output_d = torch.zeros([polar.shape[0], 2]).to(self.device)
+        self.p_output_d[:, 0] = polar[:, 1] * torch.cos(polar[:, 0])
+        self.p_output_d[:, 1] = polar[:, 1] * torch.sin(polar[:, 0])
 
         jac = torch.tensor([
             [1.0, 0.0],
             [0.0, 50.0],
         ])
-        polar = (
-            torch.matmul(jac, self.q.unsqueeze(-1)).squeeze(-1) +
-            torch.tensor([-np.pi / 2, 150.0])  # [phi, r]
-        )
-        self.p_output_d = torch.zeros([self.q.shape[0], 2]).to(self.device)
-        self.p_output_d[:, 0] = polar[:, 1] * torch.cos(polar[:, 0])
-        self.p_output_d[:, 1] = polar[:, 1] * torch.sin(polar[:, 0])
-
+        self.q = torch.matmul(
+            torch.inverse(jac), polar.unsqueeze(-1),
+        ).squeeze(-1)
+        self.q = self.q - torch.mean(self.q, dim=0)
         self.q = self.q.expand(self.n_designs, *self.q.shape).to(self.device)
 
         self.g = topology.gen_graph(self.plan)
