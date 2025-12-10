@@ -8,13 +8,13 @@ import importlib.resources
 from any_linkage import resources
 
 min_parallel_size = 10000
-rsip_batch_size = 1000
-rrip_n_batches = 10
-hip_batch_size = 5000
+remove_subgraph_isomorphic_plans_batch_size = 1000
+roughly_remove_isomorphic_plans_n_batches = 10
+has_isomorphic_plan_batch_size = 5000
 rng = np.random.default_rng(0)
 
 
-def gen_plan(n, g):
+def _gen_plan(n, g):
     plan = []
     pre_ns = list(g.predecessors(n))
     while len(pre_ns) == 1:
@@ -25,7 +25,7 @@ def gen_plan(n, g):
     return plan
 
 
-def expand_leaf(n, g):
+def _expand_leaf(n, g):
     n_links = g.nodes[n]["n_links"]
     n_motors = g.nodes[n]["n_motors"]
     for op in ["m", "f"]:
@@ -69,7 +69,7 @@ def enum_all_plans(max_n_steps, return_graph=False):
 
         plans = []
         for n in leaf_ns:
-            plans.append(gen_plan(n, g))
+            plans.append(_gen_plan(n, g))
         all_plans.append(plans)
 
         if i == max_n_steps + 1:
@@ -77,7 +77,7 @@ def enum_all_plans(max_n_steps, return_graph=False):
 
         count = 0
         for n in leaf_ns:
-            expand_leaf(n, g)
+            _expand_leaf(n, g)
             count += g.out_degree(n)
             print(f"step: {i}, plans: {count}", end="\r")
         print("")
@@ -143,9 +143,15 @@ def _parallel_remove_subgraph_isomorphic_plans_func(args):
 
 
 def _parallel_remove_subgraph_isomorphic_plans(plans, unique_plans):
-    n_batches = len(plans) // rsip_batch_size + 1
+    n_batches = len(plans) // remove_subgraph_isomorphic_plans_batch_size + 1
     batched_plans = [
-        (plans[i * rsip_batch_size:(i + 1) * rsip_batch_size], unique_plans)
+        (
+            plans[
+                i * remove_subgraph_isomorphic_plans_batch_size:
+                (i + 1) * remove_subgraph_isomorphic_plans_batch_size
+            ],
+            unique_plans,
+        )
         for i in range(n_batches)
     ]
     _plans = []
@@ -194,9 +200,15 @@ def parallel_has_isomorphic_plan_func(args):
 
 
 def parallel_has_isomorphic_plan(plan, plans):
-    n_batches = len(plans) // hip_batch_size + 1
+    n_batches = len(plans) // has_isomorphic_plan_batch_size + 1
     batched_plans = [
-        (plan, plans[i * hip_batch_size:(i + 1) * hip_batch_size])
+        (
+            plan,
+            plans[
+                i * has_isomorphic_plan_batch_size:
+                (i + 1) * has_isomorphic_plan_batch_size
+            ],
+        )
         for i in range(n_batches)
     ]
     with Pool(min(cpu_count(), n_batches)) as p:
@@ -257,7 +269,7 @@ def roughly_remove_isomorphic_plans(plans):
     indices = np.arange(len(plans))
     rng.shuffle(indices)
     plans = [plans[index] for index in indices]
-    batch_size = len(plans) // rrip_n_batches + 1
+    batch_size = len(plans) // roughly_remove_isomorphic_plans_n_batches + 1
 
     with Manager() as manager:
         counter = manager.dict()
@@ -267,7 +279,7 @@ def roughly_remove_isomorphic_plans(plans):
                 plans[i * batch_size:(i + 1) * batch_size],
                 i, counter
             )
-            for i in range(rrip_n_batches)
+            for i in range(roughly_remove_isomorphic_plans_n_batches)
         ]
 
         counter_printer = Process(
@@ -276,7 +288,7 @@ def roughly_remove_isomorphic_plans(plans):
         )
         counter_printer.start()
 
-        with Pool(min(cpu_count(), rrip_n_batches)) as e:
+        with Pool(min(cpu_count(), roughly_remove_isomorphic_plans_n_batches)) as e:
             _plans = e.map(
                 roughly_remove_isomorphic_plans_func,
                 batched_plans,
@@ -304,7 +316,7 @@ def enum(path, resume=False, max_n_steps=5):
     def load_plans(name):
         file_names = [
             f for f in os.listdir(folder_name)
-            if name in f
+            if name + ".npy" in f
         ]
         if len(file_names) > 0:
             assert len(file_names) == 1
