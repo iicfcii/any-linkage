@@ -15,21 +15,27 @@ rng = np.random.default_rng(0)
 
 
 def _gen_plan(n, g):
-    plan = []
+    plan = [g.nodes[n]["op"]]
     pre_ns = list(g.predecessors(n))
-    while len(pre_ns) == 1:
-        plan.insert(0, g.nodes[n]["op"])
-        n = pre_ns[0]
-        pre_ns = list(g.predecessors(n))
-    plan.insert(0, g.nodes[n]["op"])
+    while len(pre_ns) != 0:
+        assert len(pre_ns) == 1
+        pre_n = pre_ns[0]
+        plan.insert(0, g.nodes[pre_n]["op"])
+        pre_ns = list(g.predecessors(pre_n))
     return plan
 
 
-def _expand_leaf(n, g):
+def _expand_leaf(n, g, max_n_followers):
+    def out_out_bounds(n_links, n_motors):
+        return n_links > n_motors + 1 + max_n_followers
+
     n_links = g.nodes[n]["n_links"]
     n_motors = g.nodes[n]["n_motors"]
     for op in ["m", "f"]:
         if op == "m":
+            if out_out_bounds(n_links + 1, n_motors + 1):
+                continue
+
             l0 = n_links
             for la in range(n_links):
                 na = len(g.nodes)
@@ -41,6 +47,9 @@ def _expand_leaf(n, g):
                 )
                 g.add_edge(n, na)
         else:
+            if out_out_bounds(n_links + 2, n_motors):
+                continue
+
             l0 = n_links
             l1 = l0 + 1
             for la, lb in permutations(range(n_links), 2):
@@ -54,7 +63,7 @@ def _expand_leaf(n, g):
                 g.add_edge(n, na)
 
 
-def enum_all_plans(max_n_steps, return_graph=False):
+def enum_all_plans(max_n_steps, max_n_followers, return_graph=False):
     # Directed graph (tree) for enumerating all possible operation sequences.
     # Each operation is either adding one motorized link (m) or adding two follower links (f)
     g = nx.DiGraph()
@@ -65,7 +74,10 @@ def enum_all_plans(max_n_steps, return_graph=False):
 
     all_plans = []
     for i in range(2, max_n_steps + 2):
-        leaf_ns = [n for n, d in g.out_degree if d == 0]
+        leaf_ns = [
+            n for n in g.nodes
+            if nx.shortest_path_length(g, 0, n) == i - 2
+        ]
 
         plans = []
         for n in leaf_ns:
@@ -77,7 +89,7 @@ def enum_all_plans(max_n_steps, return_graph=False):
 
         count = 0
         for n in leaf_ns:
-            _expand_leaf(n, g)
+            _expand_leaf(n, g, max_n_followers)
             count += g.out_degree(n)
             print(f"step: {i}, plans: {count}", end="\r")
         print("")
@@ -305,7 +317,7 @@ def roughly_remove_isomorphic_plans(plans):
     return _plans
 
 
-def enum(path, resume=False, max_n_steps=5):
+def enum(path, resume=False, max_n_steps=6, max_n_followers=6):
     if not resume:
         timestamp = int(time.time())
         folder_name = os.path.join(path, f"{timestamp}_plans")
@@ -338,7 +350,7 @@ def enum(path, resume=False, max_n_steps=5):
     name = f"all_plans_{max_n_steps}"
     loaded_plans = load_plans(name)
     if loaded_plans is None:
-        all_plans = enum_all_plans(max_n_steps)
+        all_plans = enum_all_plans(max_n_steps, max_n_followers)
         save_plans(name, all_plans)
     else:
         all_plans = loaded_plans
