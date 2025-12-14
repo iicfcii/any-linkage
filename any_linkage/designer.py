@@ -36,26 +36,16 @@ class Design(ABC):
         raise NotImplementedError
 
     def eval(self):
-        self.loss, self.loss_weighted, self.p, self.c = self._eval()
+        self.loss, self.loss_weighted, self.q, self.p, self.c = self._eval()
         return self.loss
 
     def plot(self):
-        indices = torch.argsort(self.loss)
-        self.q = self.q[indices]
-        for k, v in self.p.items():
-            self.p[k] = v[indices]
-        self.c = [
-            _c[:4] + [_c[4][indices], _c[5][indices]]
-            for _c in self.c
-        ]
-        self.loss = self.loss[indices]
-        self.loss_weighted = self.loss_weighted[indices]
-
         self.plotter = Plotter(
             self.q, self.p, self.c,
             self.plotter_bbox,
-            self._on_plotted,
-            self._on_design_changed,
+            indices=torch.argsort(self.loss),
+            on_plotted=self._on_plotted,
+            on_design_changed=self._on_design_changed,
         )
 
     def _on_plotted(self, d_index, q_index):

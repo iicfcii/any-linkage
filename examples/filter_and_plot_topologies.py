@@ -23,12 +23,11 @@ def main():
             e for e in g.edges(0)
             if g[e[0]][e[1]]["type"] == "m"
         ])
+        n_output_joints = len(g.edges(list(g.nodes)[-1]))
         if (
-            n_motors <= 2 and
-            n_links <= 5 and
-            n_links_to_output >= 2 and
-            n_ground_joints > 0 and
-            n_ground_motors > 0
+            n_motors == 3 and
+            n_links <= 6 and
+            n_links_to_output >= 3
         ):
             filtered_plans.append(plan)
 

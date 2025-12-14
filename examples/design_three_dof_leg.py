@@ -1,0 +1,292 @@
+import sys
+import torch
+from torch.func import jacrev
+import numpy as np
+import networkx as nx
+import matplotlib.pyplot as plt
+import any_linkage.topology as topology
+import any_linkage.dimensions as dimensions
+import any_linkage.designer as designer
+
+
+class ThreeDoFLegDesign(designer.Design):
+    def plans():
+        plans = topology.load()
+
+        filtered_plans = []
+        for plan in plans:
+            g = topology.gen_graph(plan)
+            n_motors = len([
+                e for e in g.edges
+                if g[e[0]][e[1]]["type"] == "m"
+            ])
+            n_links = len(g.nodes)
+            n_links_to_output = nx.shortest_path_length(
+                g, list(g.nodes)[0], list(g.nodes)[-1]
+            )
+            if (
+                n_motors == 3 and
+                n_links <= 6 and
+                n_links_to_output >= 3
+            ):
+                filtered_plans.append(plan)
+        return filtered_plans
+
+    def __init__(self, plan_index, seed=0):
+        super().__init__(plan_index, seed=seed)
+        self.plotter_bbox = (-200, -300, 400, 400)
+
+        self.plan = ThreeDoFLegDesign.plans()[self.plan_index]
+        self.g = topology.gen_graph(self.plan)
+        self.c_empty = dimensions.gen_constraints(self.plan)
+        self.origin_key = dimensions.origin_key
+        self.toe_key = dimensions.get_output_key(self.c_empty)
+        output_node = list(self.g.nodes)[-1]
+        output_edges = list(self.g.edges(output_node))
+        self.ankle_key = tuple(sorted(list(output_edges[0])))
+
+        self.n_designs = 1000
+
+        self.cos_max = torch.tensor(0.8).to(self.device)
+        self.output_clearance_min = torch.tensor(20).to(self.device)
+        self.width_max = torch.tensor(100).to(self.device)
+
+        self.weights = torch.tensor([
+            1, 100, 0.001, 1000, 1, 1, 1,
+        ]).to(self.device)
+
+        self.p0 = {}
+        for key in dimensions.get_point_keys(self.c_empty):
+            p = torch.zeros([self.n_designs, 2]).to(self.device)
+            p[:, 0].uniform_(-200, 200)
+            p[:, 1].uniform_(-300, 100)
+            p.requires_grad_(True)
+            self.params.append(p)
+            self.p0[key] = p
+
+        grid = torch.meshgrid(
+            torch.linspace(-1, 1, 5) - np.pi / 2,
+            torch.linspace(200, 100, 5),
+            torch.linspace(-0.5, 0.5, 5),
+            indexing="ij",
+        )
+        polar = torch.stack([axis.flatten() for axis in grid]).T
+
+        self.p_ankle_d = torch.zeros([polar.shape[0], 2]).to(self.device)
+        self.p_ankle_d[:, 0] = polar[:, 1] * torch.cos(polar[:, 0])
+        self.p_ankle_d[:, 1] = polar[:, 1] * torch.sin(polar[:, 0])
+        self.theta_ankle_d = (
+            polar[:, 2] + polar[:, 0] + np.pi / 2
+        ).to(self.device)
+        self.l_ankle_toe = 20
+
+        jac = torch.zeros(self.n_designs, 3, 3).to(self.device)
+        jac[:, :, 0].uniform_(-1, 1)
+        jac[:, :, 1].uniform_(-1 / 100, 1 / 100)
+        jac[:, :, 2].uniform_(-1, 1)
+        self.jac_scale = torch.tensor([100, 10000, 100]).to(self.device)
+        self.jac_scaled = jac * self.jac_scale
+        self.jac_scaled.requires_grad_(True)
+        self.params.append(self.jac_scaled)
+
+        self.polar = polar.to(self.device)
+
+        self.points_of_links = []
+        for n in self.g.nodes:
+            points = list(self.g.edges(n))
+            if self.g.nodes[n]["type"] == "g":
+                points.append(self.origin_key)
+            if self.g.nodes[n]["type"] == "o":
+                points.append(self.toe_key)
+            points = [tuple(sorted(list(point))) for point in points]
+            self.points_of_links.append(points)
+
+        self.joints_of_links = []
+        for n in self.g.nodes:
+            joints = list(self.g.edges(n))
+            joints = [tuple(sorted(list(joint))) for joint in joints]
+            self.joints_of_links.append(joints)
+
+    def _eval(self):
+        c = dimensions.populate(self.p0, self.c_empty)
+
+        jac = self.jac_scaled / self.jac_scale
+        q = torch.matmul(
+            jac.unsqueeze(1), self.polar.unsqueeze(-1),
+        ).squeeze(-1)
+        q = q - torch.mean(q, dim=1, keepdim=True)
+
+        p, cos_theta, cos_theta_p, cos_mu = dimensions.fk(
+            q, self.p0, c,
+        )
+        if cos_theta is None:
+            cos = torch.zeros(self.n_designs, device=self.device)
+        else:
+            cos = torch.stack([cos_theta, cos_theta_p, cos_mu], dim=2)
+            cos = torch.amax(torch.abs(cos), dim=(1, 2, 3))
+
+        loss_ankle_error = torch.mean(
+            torch.sum(
+                (p[self.ankle_key] - self.p_ankle_d)**2,
+                dim=-1,
+            ),
+            dim=-1,
+        )
+
+        v_ankle_toe = p[self.toe_key] - p[self.ankle_key]
+        theta_ankle = torch.atan2(v_ankle_toe[:, :, 1], v_ankle_toe[:, :, 0])
+        loss_theta_ankle_error = torch.mean(
+            (theta_ankle - self.theta_ankle_d)**2,
+            dim=-1,
+        )
+
+        centroid_link_length = []
+        for points_of_link in self.points_of_links:
+            _p = torch.stack(
+                [self.p0[edge] for edge in points_of_link],
+                dim=1,
+            )
+            # sum of distances to centroid
+            centroid_link_length.append(torch.sum(
+                torch.linalg.norm(
+                    _p - torch.mean(_p, dim=1, keepdim=True),
+                    dim=-1,
+                ),
+                dim=1,
+            ))
+        centroid_link_length = torch.stack(centroid_link_length, dim=0).T
+        total_link_length = torch.sum(centroid_link_length, dim=1)
+        loss_total_link_length = total_link_length
+
+        loss_cos = torch.maximum(
+            cos, self.cos_max,
+        ) - self.cos_max
+
+        p_other = torch.stack(
+            [v for k, v in p.items() if k != self.ankle_key and k != self.toe_key],
+            dim=2,
+        )
+        p_ankle = p[self.ankle_key]
+        angle = (
+            -torch.atan2(p_ankle[:, :, 1], p_ankle[:, :, 0]) +
+            -np.pi / 2
+        )
+        rot = torch.stack([
+            torch.cos(angle), -torch.sin(angle),
+            torch.sin(angle), torch.cos(angle)
+        ], dim=2).reshape(*angle.shape, 2, 2)
+        p_other = torch.matmul(
+            rot.unsqueeze(2), p_other.unsqueeze(-1),
+        ).squeeze(-1)
+        p_ankle = torch.matmul(
+            rot, p_ankle.unsqueeze(-1),
+        ).squeeze(-1)
+        output_clearance = (
+            p_ankle[:, :, 1] - torch.amin(p_other[:, :, :, 1], dim=-1)
+        )
+        output_clearance = torch.amax(output_clearance, dim=-1)
+        loss_output_clearance = torch.maximum(
+            output_clearance, -self.output_clearance_min,
+        ) - -self.output_clearance_min
+
+        x_max = torch.amax(p_other[:, :, :, 0], dim=(1, 2))
+        x_min = torch.amin(p_other[:, :, :, 0], dim=(1, 2))
+        width = x_max - x_min
+        loss_width = torch.maximum(
+            width, self.width_max,
+        ) - self.width_max
+
+        loss_ankle_toe_length = torch.abs(
+            torch.linalg.norm(
+                v_ankle_toe[:, 0, :], dim=-1,
+            ) - self.l_ankle_toe,
+        )
+
+        loss_itemized = torch.stack(
+            [
+                loss_ankle_error,
+                loss_theta_ankle_error,
+                loss_total_link_length,
+                loss_cos,
+                loss_output_clearance,
+                loss_width,
+                loss_ankle_toe_length,
+            ],
+            dim=1,
+        )
+        loss_weighted = self.weights * loss_itemized
+        loss = torch.sum(self.weights * loss_itemized, dim=1)
+
+        return loss, loss_weighted, q, p, c
+
+    def _on_plotted(self, d_index, q_index):
+        p_ankle = self.p[self.ankle_key][d_index].detach().cpu().numpy()
+        p_toe = self.p[self.toe_key][d_index].detach().cpu().numpy()
+        p_ankle_d = self.p_ankle_d.detach().cpu().numpy()
+        theta_ankle_d = self.theta_ankle_d.detach().cpu().numpy()
+        p_toe_d = np.array([
+            self.l_ankle_toe * np.cos(theta_ankle_d),
+            self.l_ankle_toe * np.sin(theta_ankle_d),
+        ]).T + p_ankle_d
+
+        plt.plot(p_ankle[:, 0], p_ankle[:, 1], '.b', lw=1)
+        plt.plot(p_toe[:, 0], p_toe[:, 1], '.b', lw=1)
+        plt.plot(p_ankle_d[:, 0], p_ankle_d[:, 1], '.g', lw=1)
+        plt.plot(p_toe_d[:, 0], p_toe_d[:, 1], '.g', lw=1)
+
+    def _on_design_changed(self, d_index, q_index):
+        print(
+            f"design: {d_index}, "
+            f"l: {self.loss[d_index]:.4f}, "
+            f"l_ae: {self.loss_weighted[d_index][0]:.4f}, "
+            f"l_tae: {self.loss_weighted[d_index][1]:.4f}, "
+            f"l_tll: {self.loss_weighted[d_index][2]:.4f}, "
+            f"l_cos: {self.loss_weighted[d_index][3]:.4f}, "
+            f"l_oc: {self.loss_weighted[d_index][4]:.4f}, "
+            f"l_w: {self.loss_weighted[d_index][5]:.4f}, "
+            f"l_atl: {self.loss_weighted[d_index][6]:.4f}"
+        )
+        jac = (
+            self.jac_scaled[d_index] / self.jac_scale
+        ).detach().cpu().numpy()
+        jac_inv = torch.inverse(
+            self.jac_scaled[d_index] / self.jac_scale,
+        ).detach().cpu().numpy()
+        q_max = torch.amax(self.q[d_index], dim=0).detach().cpu().numpy()
+        q_min = torch.amin(self.q[d_index], dim=0).detach().cpu().numpy()
+        with np.printoptions(precision=4, suppress=True, floatmode="fixed"):
+            print(jac)
+            print(jac_inv)
+            print(q_max)
+            print(q_min)
+
+
+def main():
+    if sys.argv[1] == "t":
+        plan_index = int(sys.argv[2])
+        design = ThreeDoFLegDesign(plan_index)
+        design.eval()
+        design.plot()
+        plt.show()
+
+    if sys.argv[1] == "o":
+        plan_index = int(sys.argv[2])
+        design = ThreeDoFLegDesign(plan_index)
+        designer.optimize(design, id=plan_index)
+        designer.save(design, "logs", name="three_dof_leg")
+
+    if sys.argv[1] == "s":
+        designer.sweep(
+            ThreeDoFLegDesign,
+            name="three_dof_leg", processes=2,
+        )
+
+    if sys.argv[1] == "p":
+        path = sys.argv[2]
+        design = designer.load(path)
+        design.plot()
+        plt.show()
+
+
+if __name__ == "__main__":
+    main()
