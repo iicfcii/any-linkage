@@ -81,10 +81,12 @@ class ThreeDoFLegDesign(designer.Design):
         self.l_ankle_toe = 20
 
         jac = torch.zeros(self.n_designs, 3, 3).to(self.device)
-        jac[:, :, 0].uniform_(-1, 1)
-        jac[:, :, 1].uniform_(-1 / 100, 1 / 100)
-        jac[:, :, 2].uniform_(-1, 1)
-        self.jac_scale = torch.tensor([100, 10000, 100]).to(self.device)
+        jac[:, 0, :].uniform_(-1, 1)
+        jac[:, 1, :].uniform_(-100, 100)
+        jac[:, 2, :].uniform_(-1, 1)
+        self.jac_scale = torch.tensor(
+            [100, 1, 100],
+        ).expand(3, -1).T.to(self.device)
         self.jac_scaled = jac * self.jac_scale
         self.jac_scaled.requires_grad_(True)
         self.params.append(self.jac_scaled)
@@ -110,9 +112,9 @@ class ThreeDoFLegDesign(designer.Design):
     def _eval(self):
         c = dimensions.populate(self.p0, self.c_empty)
 
-        jac = self.jac_scaled / self.jac_scale
+        jac_inv = torch.linalg.inv(self.jac_scaled / self.jac_scale)
         q = torch.matmul(
-            jac.unsqueeze(1), self.polar.unsqueeze(-1),
+            jac_inv.unsqueeze(1), self.polar.unsqueeze(-1),
         ).squeeze(-1)
         q = q - torch.mean(q, dim=1, keepdim=True)
 
@@ -249,14 +251,10 @@ class ThreeDoFLegDesign(designer.Design):
         jac = (
             self.jac_scaled[d_index] / self.jac_scale
         ).detach().cpu().numpy()
-        jac_inv = torch.inverse(
-            self.jac_scaled[d_index] / self.jac_scale,
-        ).detach().cpu().numpy()
         q_max = torch.amax(self.q[d_index], dim=0).detach().cpu().numpy()
         q_min = torch.amin(self.q[d_index], dim=0).detach().cpu().numpy()
         with np.printoptions(precision=4, suppress=True, floatmode="fixed"):
             print(jac)
-            print(jac_inv)
             print(q_max)
             print(q_min)
 
