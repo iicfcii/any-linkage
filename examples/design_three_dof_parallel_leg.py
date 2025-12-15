@@ -234,10 +234,10 @@ class ThreeDoFParallelLegDesign(designer.Design):
             ],
             dim=1,
         )
-        loss_weighted = self.weights * loss_itemized
+        self.loss_weighted = self.weights * loss_itemized
         loss = torch.sum(self.weights * loss_itemized, dim=1)
 
-        return loss, loss_weighted, q, p, c
+        return loss, q, p, c
 
     def _on_plotted(self, d_index, q_index):
         p_ankle = self.p[self.ankle_key][d_index].detach().cpu().numpy()
@@ -269,18 +269,15 @@ class ThreeDoFParallelLegDesign(designer.Design):
         jac = (
             self.jac_scaled[d_index] / self.jac_scale
         ).detach().cpu().numpy()
-        q_max = torch.amax(self.q[d_index], dim=0).detach().cpu().numpy()
-        q_min = torch.amin(self.q[d_index], dim=0).detach().cpu().numpy()
-        q_res = self.q_res_scaled[d_index] / self.q_res_scale
-        q_res_max = torch.amax(q_res, dim=0).detach().cpu().numpy()
-        q_res_min = torch.amin(q_res, dim=0).detach().cpu().numpy()
+        q_std = torch.std(self.q[d_index], dim=0).detach().cpu().numpy()
+        q_res_std = torch.std(
+            self.q_res_scaled[d_index] / self.q_res_scale, dim=0,
+        ).detach().cpu().numpy()
         with np.printoptions(precision=4, suppress=True, floatmode="fixed"):
             print("jac: ")
             print(jac)
-            print(f"q_min: {q_min}")
-            print(f"q_max: {q_max}")
-            print(f"q_res_min: {q_res_min}")
-            print(f"q_res_max: {q_res_max}")
+            print(f"q_std: {q_std}")
+            print(f"q_res_std: {q_res_std}")
 
 
 def main():

@@ -36,7 +36,7 @@ class Design(ABC):
         raise NotImplementedError
 
     def eval(self):
-        self.loss, self.loss_weighted, self.q, self.p, self.c = self._eval()
+        self.loss, self.q, self.p, self.c = self._eval()
         return self.loss
 
     def plot(self):

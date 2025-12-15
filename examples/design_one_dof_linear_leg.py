@@ -143,10 +143,10 @@ class OneDoFLinearLegDesign(designer.Design):
             ],
             dim=1,
         )
-        loss_weighted = self.weights * loss_itemized
+        self.loss_weighted = self.weights * loss_itemized
         loss = torch.sum(self.weights * loss_itemized, dim=1)
 
-        return loss, loss_weighted, p, c
+        return loss, self.q, p, c
 
     def _on_plotted(self, d_index, q_index):
         p_output = self.p[self.output_key][d_index].detach().cpu().numpy()
