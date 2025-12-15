@@ -1,6 +1,5 @@
 import sys
 import torch
-from torch.func import jacrev
 import numpy as np
 import networkx as nx
 import matplotlib.pyplot as plt
@@ -9,7 +8,7 @@ import any_linkage.dimensions as dimensions
 import any_linkage.designer as designer
 
 
-class ThreeDoFLegDesign(designer.Design):
+class ThreeDoFParallelLegDesign(designer.Design):
     def plans():
         plans = topology.load()
 
@@ -24,26 +23,36 @@ class ThreeDoFLegDesign(designer.Design):
             n_links_to_output = nx.shortest_path_length(
                 g, list(g.nodes)[0], list(g.nodes)[-1]
             )
+            n_ground_joints = len(g.edges(0))
+            n_ground_motors = len([
+                e for e in g.edges(0)
+                if g[e[0]][e[1]]["type"] == "m"
+            ])
             if (
                 n_motors == 3 and
-                n_links <= 6 and
-                n_links_to_output >= 3
+                n_links <= 10 and
+                n_links_to_output == 3 and
+                n_ground_joints == 3 and
+                n_ground_motors == 3
             ):
-                filtered_plans.append(plan)
+                paths = list(nx.all_shortest_paths(
+                    g, list(g.nodes)[0], list(g.nodes)[-1]
+                ))
+                for path in paths:
+                    ankle_key = tuple(path[-2:])
+                    filtered_plans.append((plan, ankle_key))
         return filtered_plans
 
     def __init__(self, plan_index, seed=0):
         super().__init__(plan_index, seed=seed)
         self.plotter_bbox = (-200, -300, 400, 400)
 
-        self.plan = ThreeDoFLegDesign.plans()[self.plan_index]
+        self.plan, self.ankle_key = ThreeDoFParallelLegDesign.plans()[
+            self.plan_index]
         self.g = topology.gen_graph(self.plan)
         self.c_empty = dimensions.gen_constraints(self.plan)
         self.origin_key = dimensions.origin_key
         self.toe_key = dimensions.get_output_key(self.c_empty)
-        output_node = list(self.g.nodes)[-1]
-        output_edges = list(self.g.edges(output_node))
-        self.ankle_key = tuple(sorted(list(output_edges[0])))
 
         self.n_designs = 1000
 
@@ -91,6 +100,13 @@ class ThreeDoFLegDesign(designer.Design):
         self.jac_scaled.requires_grad_(True)
         self.params.append(self.jac_scaled)
 
+        q_res = torch.zeros(self.n_designs, *polar.shape).to(self.device)
+        q_res.uniform_(-0.1, 0.1)
+        self.q_res_scale = 1000
+        self.q_res_scaled = q_res * self.q_res_scale
+        self.q_res_scaled.requires_grad_(True)
+        self.params.append(self.q_res_scaled)
+
         self.polar = polar.to(self.device)
 
         self.points_of_links = []
@@ -117,6 +133,8 @@ class ThreeDoFLegDesign(designer.Design):
             jac_inv.unsqueeze(1), self.polar.unsqueeze(-1),
         ).squeeze(-1)
         q = q - torch.mean(q, dim=1, keepdim=True)
+        q_res = self.q_res_scaled / self.q_res_scale
+        q = q + q_res
 
         p, cos_theta, cos_theta_p, cos_mu = dimensions.fk(
             q, self.p0, c,
@@ -232,9 +250,9 @@ class ThreeDoFLegDesign(designer.Design):
         ]).T + p_ankle_d
 
         plt.plot(p_ankle[:, 0], p_ankle[:, 1], '.b', lw=1)
-        plt.plot(p_toe[:, 0], p_toe[:, 1], '.b', lw=1)
+        plt.plot(p_toe[:, 0], p_toe[:, 1], '2b', lw=1)
         plt.plot(p_ankle_d[:, 0], p_ankle_d[:, 1], '.g', lw=1)
-        plt.plot(p_toe_d[:, 0], p_toe_d[:, 1], '.g', lw=1)
+        plt.plot(p_toe_d[:, 0], p_toe_d[:, 1], '2g', lw=1)
 
     def _on_design_changed(self, d_index, q_index):
         print(
@@ -253,30 +271,37 @@ class ThreeDoFLegDesign(designer.Design):
         ).detach().cpu().numpy()
         q_max = torch.amax(self.q[d_index], dim=0).detach().cpu().numpy()
         q_min = torch.amin(self.q[d_index], dim=0).detach().cpu().numpy()
+        q_res = self.q_res_scaled[d_index] / self.q_res_scale
+        q_res_max = torch.amax(q_res, dim=0).detach().cpu().numpy()
+        q_res_min = torch.amin(q_res, dim=0).detach().cpu().numpy()
         with np.printoptions(precision=4, suppress=True, floatmode="fixed"):
+            print("jac: ")
             print(jac)
-            print(q_max)
-            print(q_min)
+            print(f"q_min: {q_min}")
+            print(f"q_max: {q_max}")
+            print(f"q_res_min: {q_res_min}")
+            print(f"q_res_max: {q_res_max}")
 
 
 def main():
     if sys.argv[1] == "t":
         plan_index = int(sys.argv[2])
-        design = ThreeDoFLegDesign(plan_index)
+        design = ThreeDoFParallelLegDesign(plan_index)
         design.eval()
         design.plot()
         plt.show()
 
     if sys.argv[1] == "o":
         plan_index = int(sys.argv[2])
-        design = ThreeDoFLegDesign(plan_index)
-        designer.optimize(design, id=plan_index)
-        designer.save(design, "logs", name="three_dof_leg")
+        design = ThreeDoFParallelLegDesign(plan_index)
+        designer.optimize(design, id=plan_index, n_steps=50000)
+        designer.save(design, "logs", name="three_dof_parallel_leg")
 
     if sys.argv[1] == "s":
         designer.sweep(
-            ThreeDoFLegDesign,
-            name="three_dof_leg", processes=2,
+            ThreeDoFParallelLegDesign,
+            name="three_dof_parallel_leg", processes=1,
+            optimize_kwargs={"n_steps": 50000},
         )
 
     if sys.argv[1] == "p":
