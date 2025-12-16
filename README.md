@@ -26,6 +26,12 @@ This example enumerates all the possible topologies and save the intermediate an
 python -m examples.enum_topologies
 ```
 
+The following command can be used to resume a previous enumeration. 
+
+```
+python -m examples.enum_topologies PATH/TO/FOLDER
+```
+
 ### Filter and Plot Topologies
 This example shows how to filter the topologies and plot some, which is useful for investigating the available topologies and narrowing down specific ones for dimensional synthesis. 
 
@@ -77,15 +83,17 @@ This example shows how to design a one-DoF walking leg. This is useful for build
 
 ![one-DoF walking leg](assets/one_dof_walking_leg.png)
 
-### Design Two-DoF Serial Leg
-This example shows how to design a two-DoF serial leg. The leg has decoupled motion in the swinging, and extension and retraction direction. The Jacobian matrix that maps the input joint velocities to the foot velocities in the polar coordinate system is diagonal. The available commands stay the same. 
+### Design Two-DoF Constant Jacobian Leg
+This example shows how to design a two-DoF constant jacobian leg. The Jacobian matrix that maps the input joint velocities to the foot velocities in the polar coordinate system should be constant. Both serial and parallel legs can satisfy the requirment. The available commands stay the same. 
 
-![two-DoF serial leg](assets/two_dof_serial_leg.png)
+![two-DoF constant jacobian parallel leg](assets/two_dof_constant_jacobian_parallel_leg.png)
 
-### Design Two-DoF Parallel Leg
-This example shows how to design a two-DoF parallel leg. The leg has fully coupled motion in the swinging, and extension and retraction direction. The Jacobian matrix that maps the input joint velocities to the foot velocities in the polar coordinate system has no zero elements. The available commands stay the same. 
+![two-DoF constant jacobian serial leg](assets/two_dof_constant_jacobian_serial_leg.png)
 
-![two-DoF parallel leg](assets/two_dof_parallel_leg.png)
+### Design Three-DoF Parallel Leg
+This example shows how to design a three-DoF parallel leg. The available commands stay the same. 
+
+![three-DoF parallel leg](assets/three_dof_parallel_leg.png)
 
 ## Citation
 The one-DoF topology generation and dimensional optimization are described in: 

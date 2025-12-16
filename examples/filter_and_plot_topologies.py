@@ -18,17 +18,10 @@ def main():
         n_links_to_output = nx.shortest_path_length(
             g, list(g.nodes)[0], list(g.nodes)[-1]
         )
-        n_ground_joints = len(g.edges(0))
-        n_ground_motors = len([
-            e for e in g.edges(0)
-            if g[e[0]][e[1]]["type"] == "m"
-        ])
         if (
-            n_motors == 3 and
-            n_links <= 10 and
-            n_links_to_output == 3 and
-            n_ground_joints == 3 and
-            n_ground_motors == 3
+            n_motors <= 2 and
+            n_links <= 5 and
+            n_links_to_output >= 2
         ):
             filtered_plans.append(plan)
 
