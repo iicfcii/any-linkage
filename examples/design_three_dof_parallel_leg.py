@@ -291,14 +291,15 @@ def main():
     if sys.argv[1] == "o":
         plan_index = int(sys.argv[2])
         design = ThreeDoFParallelLegDesign(plan_index)
-        designer.optimize(design, id=plan_index, n_steps=50000)
+        designer.optimize(design, id=plan_index, n_steps=100000)
         designer.save(design, "logs", name="three_dof_parallel_leg")
 
     if sys.argv[1] == "s":
         designer.sweep(
             ThreeDoFParallelLegDesign,
-            name="three_dof_parallel_leg", processes=1,
-            optimize_kwargs={"n_steps": 50000},
+            name="three_dof_parallel_leg",
+            processes=1,
+            optimize_kwargs={"n_steps": 100000},
         )
 
     if sys.argv[1] == "p":

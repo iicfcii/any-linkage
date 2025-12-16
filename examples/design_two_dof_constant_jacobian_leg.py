@@ -8,7 +8,7 @@ import any_linkage.dimensions as dimensions
 import any_linkage.designer as designer
 
 
-class ThreeDoFHybridLegDesign(designer.Design):
+class TwoDoFConstantJacobianLegDesign(designer.Design):
     def plans():
         plans = topology.load()
 
@@ -24,28 +24,22 @@ class ThreeDoFHybridLegDesign(designer.Design):
                 g, list(g.nodes)[0], list(g.nodes)[-1]
             )
             if (
-                n_motors == 3 and
-                n_links <= 6 and
-                n_links_to_output == 3
+                n_motors == 2 and
+                n_links <= 5 and
+                n_links_to_output == 2
             ):
-                paths = nx.all_shortest_paths(
-                    g, list(g.nodes)[0], list(g.nodes)[-1]
-                )
-                for path in paths:
-                    ankle_key = tuple(path[-2:])
-                    filtered_plans.append((plan, ankle_key))
+                filtered_plans.append(plan)
         return filtered_plans
 
     def __init__(self, plan_index, seed=0):
         super().__init__(plan_index, seed=seed)
         self.plotter_bbox = (-200, -300, 400, 400)
 
-        self.plan, self.ankle_key = ThreeDoFHybridLegDesign.plans()[
-            self.plan_index]
+        self.plan = TwoDoFConstantJacobianLegDesign.plans()[self.plan_index]
         self.g = topology.gen_graph(self.plan)
         self.c_empty = dimensions.gen_constraints(self.plan)
         self.origin_key = dimensions.origin_key
-        self.toe_key = dimensions.get_output_key(self.c_empty)
+        self.output_key = dimensions.get_output_key(self.c_empty)
 
         self.n_designs = 1000
 
@@ -54,7 +48,7 @@ class ThreeDoFHybridLegDesign(designer.Design):
         self.width_max = torch.tensor(100).to(self.device)
 
         self.weights = torch.tensor([
-            1, 100, 0.001, 1000, 1, 1, 1,
+            1, 0.001, 1000, 1, 1,
         ]).to(self.device)
 
         self.p0 = {}
@@ -69,36 +63,23 @@ class ThreeDoFHybridLegDesign(designer.Design):
         grid = torch.meshgrid(
             torch.linspace(-1, 1, 5) - np.pi / 2,
             torch.linspace(200, 100, 5),
-            torch.linspace(-0.5, 0.5, 5),
             indexing="ij",
         )
         polar = torch.stack([axis.flatten() for axis in grid]).T
 
-        self.p_ankle_d = torch.zeros([polar.shape[0], 2]).to(self.device)
-        self.p_ankle_d[:, 0] = polar[:, 1] * torch.cos(polar[:, 0])
-        self.p_ankle_d[:, 1] = polar[:, 1] * torch.sin(polar[:, 0])
-        self.theta_ankle_d = (
-            polar[:, 2] + polar[:, 0] + np.pi / 2
-        ).to(self.device)
-        self.l_ankle_toe = 20
+        self.p_output_d = torch.zeros([polar.shape[0], 2]).to(self.device)
+        self.p_output_d[:, 0] = polar[:, 1] * torch.cos(polar[:, 0])
+        self.p_output_d[:, 1] = polar[:, 1] * torch.sin(polar[:, 0])
 
-        jac = torch.zeros(self.n_designs, 3, 3).to(self.device)
+        jac = torch.zeros(self.n_designs, 2, 2).to(self.device)
         jac[:, 0, :].uniform_(-1, 1)
         jac[:, 1, :].uniform_(-100, 100)
-        jac[:, 2, :].uniform_(-1, 1)
         self.jac_scale = torch.tensor(
-            [100, 1, 100],
-        ).expand(3, -1).T.to(self.device)
+            [100, 1],
+        ).expand(2, -1).T.to(self.device)
         self.jac_scaled = jac * self.jac_scale
         self.jac_scaled.requires_grad_(True)
         self.params.append(self.jac_scaled)
-
-        q_res = torch.zeros(self.n_designs, *polar.shape).to(self.device)
-        q_res.uniform_(-0.1, 0.1)
-        self.q_res_scale = 1000
-        self.q_res_scaled = q_res * self.q_res_scale
-        self.q_res_scaled.requires_grad_(True)
-        self.params.append(self.q_res_scaled)
 
         self.polar = polar.to(self.device)
 
@@ -108,7 +89,7 @@ class ThreeDoFHybridLegDesign(designer.Design):
             if self.g.nodes[n]["type"] == "g":
                 points.append(self.origin_key)
             if self.g.nodes[n]["type"] == "o":
-                points.append(self.toe_key)
+                points.append(self.output_key)
             points = [tuple(sorted(list(point))) for point in points]
             self.points_of_links.append(points)
 
@@ -126,8 +107,6 @@ class ThreeDoFHybridLegDesign(designer.Design):
             jac_inv.unsqueeze(1), self.polar.unsqueeze(-1),
         ).squeeze(-1)
         q = q - torch.mean(q, dim=1, keepdim=True)
-        q_res = self.q_res_scaled / self.q_res_scale
-        q = q + q_res
 
         p, cos_theta, cos_theta_p, cos_mu = dimensions.fk(
             q, self.p0, c,
@@ -138,18 +117,11 @@ class ThreeDoFHybridLegDesign(designer.Design):
             cos = torch.stack([cos_theta, cos_theta_p, cos_mu], dim=2)
             cos = torch.amax(torch.abs(cos), dim=(1, 2, 3))
 
-        loss_ankle_error = torch.mean(
+        loss_output_error = torch.mean(
             torch.sum(
-                (p[self.ankle_key] - self.p_ankle_d)**2,
+                (p[self.output_key] - self.p_output_d)**2,
                 dim=-1,
             ),
-            dim=-1,
-        )
-
-        v_ankle_toe = p[self.toe_key] - p[self.ankle_key]
-        theta_ankle = torch.atan2(v_ankle_toe[:, :, 1], v_ankle_toe[:, :, 0])
-        loss_theta_ankle_error = torch.mean(
-            (theta_ankle - self.theta_ankle_d)**2,
             dim=-1,
         )
 
@@ -176,12 +148,12 @@ class ThreeDoFHybridLegDesign(designer.Design):
         ) - self.cos_max
 
         p_other = torch.stack(
-            [v for k, v in p.items() if k != self.ankle_key and k != self.toe_key],
+            [v for k, v in p.items() if k != self.output_key],
             dim=2,
         )
-        p_ankle = p[self.ankle_key]
+        p_output = p[self.output_key]
         angle = (
-            -torch.atan2(p_ankle[:, :, 1], p_ankle[:, :, 0]) +
+            -torch.atan2(p_output[:, :, 1], p_output[:, :, 0]) +
             -np.pi / 2
         )
         rot = torch.stack([
@@ -191,11 +163,11 @@ class ThreeDoFHybridLegDesign(designer.Design):
         p_other = torch.matmul(
             rot.unsqueeze(2), p_other.unsqueeze(-1),
         ).squeeze(-1)
-        p_ankle = torch.matmul(
-            rot, p_ankle.unsqueeze(-1),
+        p_output = torch.matmul(
+            rot, p_output.unsqueeze(-1),
         ).squeeze(-1)
         output_clearance = (
-            p_ankle[:, :, 1] - torch.amin(p_other[:, :, :, 1], dim=-1)
+            p_output[:, :, 1] - torch.amin(p_other[:, :, :, 1], dim=-1)
         )
         output_clearance = torch.amax(output_clearance, dim=-1)
         loss_output_clearance = torch.maximum(
@@ -209,21 +181,13 @@ class ThreeDoFHybridLegDesign(designer.Design):
             width, self.width_max,
         ) - self.width_max
 
-        loss_ankle_toe_length = torch.abs(
-            torch.linalg.norm(
-                v_ankle_toe[:, 0, :], dim=-1,
-            ) - self.l_ankle_toe,
-        )
-
         loss_itemized = torch.stack(
             [
-                loss_ankle_error,
-                loss_theta_ankle_error,
+                loss_output_error,
                 loss_total_link_length,
                 loss_cos,
                 loss_output_clearance,
                 loss_width,
-                loss_ankle_toe_length,
             ],
             dim=1,
         )
@@ -233,64 +197,51 @@ class ThreeDoFHybridLegDesign(designer.Design):
         return loss, q, p, c
 
     def _on_plotted(self, d_index, q_index):
-        p_ankle = self.p[self.ankle_key][d_index].detach().cpu().numpy()
-        p_toe = self.p[self.toe_key][d_index].detach().cpu().numpy()
-        p_ankle_d = self.p_ankle_d.detach().cpu().numpy()
-        theta_ankle_d = self.theta_ankle_d.detach().cpu().numpy()
-        p_toe_d = np.array([
-            self.l_ankle_toe * np.cos(theta_ankle_d),
-            self.l_ankle_toe * np.sin(theta_ankle_d),
-        ]).T + p_ankle_d
+        p_output = self.p[self.output_key][d_index].detach().cpu().numpy()
+        p_output_d = self.p_output_d.detach().cpu().numpy()
 
-        plt.plot(p_ankle[:, 0], p_ankle[:, 1], '.b', lw=1)
-        plt.plot(p_toe[:, 0], p_toe[:, 1], '2b', lw=1)
-        plt.plot(p_ankle_d[:, 0], p_ankle_d[:, 1], '.g', lw=1)
-        plt.plot(p_toe_d[:, 0], p_toe_d[:, 1], '2g', lw=1)
+        plt.plot(p_output[:, 0], p_output[:, 1], '.b', lw=1)
+        plt.plot(p_output_d[:, 0], p_output_d[:, 1], '.g', lw=1)
 
     def _on_design_changed(self, d_index, q_index):
         print(
             f"design: {d_index}, "
             f"l: {self.loss[d_index]:.4f}, "
             f"l_ae: {self.loss_weighted[d_index][0]:.4f}, "
-            f"l_tae: {self.loss_weighted[d_index][1]:.4f}, "
-            f"l_tll: {self.loss_weighted[d_index][2]:.4f}, "
-            f"l_cos: {self.loss_weighted[d_index][3]:.4f}, "
-            f"l_oc: {self.loss_weighted[d_index][4]:.4f}, "
-            f"l_w: {self.loss_weighted[d_index][5]:.4f}, "
-            f"l_atl: {self.loss_weighted[d_index][6]:.4f}"
+            f"l_tll: {self.loss_weighted[d_index][1]:.4f}, "
+            f"l_cos: {self.loss_weighted[d_index][2]:.4f}, "
+            f"l_oc: {self.loss_weighted[d_index][3]:.4f}, "
+            f"l_w: {self.loss_weighted[d_index][4]:.4f}"
         )
         jac = (
             self.jac_scaled[d_index] / self.jac_scale
         ).detach().cpu().numpy()
         q_std = torch.std(self.q[d_index], dim=0).detach().cpu().numpy()
-        q_res_std = torch.std(
-            self.q_res_scaled[d_index] / self.q_res_scale, dim=0,
-        ).detach().cpu().numpy()
         with np.printoptions(precision=4, suppress=True, floatmode="fixed"):
             print("jac: ")
             print(jac)
             print(f"q_std: {q_std}")
-            print(f"q_res_std: {q_res_std}")
 
 
 def main():
     if sys.argv[1] == "t":
         plan_index = int(sys.argv[2])
-        design = ThreeDoFHybridLegDesign(plan_index)
+        design = TwoDoFConstantJacobianLegDesign(plan_index)
         design.eval()
         design.plot()
         plt.show()
 
     if sys.argv[1] == "o":
         plan_index = int(sys.argv[2])
-        design = ThreeDoFHybridLegDesign(plan_index)
+        design = TwoDoFConstantJacobianLegDesign(plan_index)
         designer.optimize(design, id=plan_index)
-        designer.save(design, "logs", name="three_dof_hybrid_leg")
+        designer.save(design, "logs", name="two_dof_constant_jacobian_leg")
 
     if sys.argv[1] == "s":
         designer.sweep(
-            ThreeDoFHybridLegDesign,
-            name="three_dof_hybrid_leg", processes=2,
+            TwoDoFConstantJacobianLegDesign,
+            name="two_dof_constant_jacobian_leg",
+            processes=2,
         )
 
     if sys.argv[1] == "p":
