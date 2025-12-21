@@ -93,12 +93,6 @@ class TwoDoFConstantJacobianLegDesign(designer.Design):
             points = [tuple(sorted(list(point))) for point in points]
             self.points_of_links.append(points)
 
-        self.joints_of_links = []
-        for n in self.g.nodes:
-            joints = list(self.g.edges(n))
-            joints = [tuple(sorted(list(joint))) for joint in joints]
-            self.joints_of_links.append(joints)
-
     def _eval(self):
         c = dimensions.populate(self.p0, self.c_empty)
 
@@ -147,19 +141,15 @@ class TwoDoFConstantJacobianLegDesign(designer.Design):
             cos, self.cos_max,
         ) - self.cos_max
 
+        p_output = p[self.output_key]
+        rot_y = -p_output
+        rot_y = rot_y / torch.linalg.norm(rot_y, dim=-1, keepdim=True)
+        rot_x = torch.stack([rot_y[:, :, 1], -rot_y[:, :, 0]], dim=-1)
+        rot = torch.stack([rot_x, rot_y], dim=-2)
         p_other = torch.stack(
             [v for k, v in p.items() if k != self.output_key],
             dim=2,
         )
-        p_output = p[self.output_key]
-        angle = (
-            -torch.atan2(p_output[:, :, 1], p_output[:, :, 0]) +
-            -np.pi / 2
-        )
-        rot = torch.stack([
-            torch.cos(angle), -torch.sin(angle),
-            torch.sin(angle), torch.cos(angle)
-        ], dim=2).reshape(*angle.shape, 2, 2)
         p_other = torch.matmul(
             rot.unsqueeze(2), p_other.unsqueeze(-1),
         ).squeeze(-1)
@@ -167,16 +157,17 @@ class TwoDoFConstantJacobianLegDesign(designer.Design):
             rot, p_output.unsqueeze(-1),
         ).squeeze(-1)
         output_clearance = (
-            p_output[:, :, 1] - torch.amin(p_other[:, :, :, 1], dim=-1)
+            p_output[:, :, 1] -
+            torch.amin(p_other[:, :, :, 1], dim=-1)
         )
         output_clearance = torch.amax(output_clearance, dim=-1)
         loss_output_clearance = torch.maximum(
             output_clearance, -self.output_clearance_min,
         ) - -self.output_clearance_min
 
-        x_max = torch.amax(p_other[:, :, :, 0], dim=(1, 2))
-        x_min = torch.amin(p_other[:, :, :, 0], dim=(1, 2))
-        width = x_max - x_min
+        x_max = torch.amax(p_other[:, :, :, 0], dim=-1)
+        x_min = torch.amin(p_other[:, :, :, 0], dim=-1)
+        width = torch.amax(x_max - x_min, dim=-1)
         loss_width = torch.maximum(
             width, self.width_max,
         ) - self.width_max

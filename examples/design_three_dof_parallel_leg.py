@@ -57,20 +57,23 @@ class ThreeDoFParallelLegDesign(designer.Design):
         self.n_designs = 1000
 
         self.cos_max = torch.tensor(0.8).to(self.device)
-        self.output_clearance_min = torch.tensor(20).to(self.device)
+        self.ankle_clearance_min = torch.tensor(20).to(self.device)
         self.width_max = torch.tensor(100).to(self.device)
 
         self.weights = torch.tensor([
-            1, 100, 0.001, 1000, 1, 1, 1,
+            1, 0.001, 1000, 1, 1,
         ]).to(self.device)
 
         self.p0 = {}
         for key in dimensions.get_point_keys(self.c_empty):
-            p = torch.zeros([self.n_designs, 2]).to(self.device)
-            p[:, 0].uniform_(-200, 200)
-            p[:, 1].uniform_(-300, 100)
-            p.requires_grad_(True)
-            self.params.append(p)
+            if 0 in key:
+                p = torch.zeros([self.n_designs, 2]).to(self.device)
+            else:
+                p = torch.zeros([self.n_designs, 2]).to(self.device)
+                p[:, 0].uniform_(-200, 200)
+                p[:, 1].uniform_(-300, 100)
+                p.requires_grad_(True)
+                self.params.append(p)
             self.p0[key] = p
 
         grid = torch.meshgrid(
@@ -84,10 +87,16 @@ class ThreeDoFParallelLegDesign(designer.Design):
         self.p_ankle_d = torch.zeros([polar.shape[0], 2]).to(self.device)
         self.p_ankle_d[:, 0] = polar[:, 1] * torch.cos(polar[:, 0])
         self.p_ankle_d[:, 1] = polar[:, 1] * torch.sin(polar[:, 0])
-        self.theta_ankle_d = (
-            polar[:, 2] + polar[:, 0] + np.pi / 2
-        ).to(self.device)
-        self.l_ankle_toe = 20
+
+        l_ankle_toe = 30
+        theta_ankle_d = polar[:, 2] + polar[:, 0] + np.pi / 2
+        self.p_toe_d = (
+            torch.stack([
+                l_ankle_toe * torch.cos(theta_ankle_d),
+                l_ankle_toe * torch.sin(theta_ankle_d),
+            ]).T.to(self.device) +
+            self.p_ankle_d
+        )
 
         jac = torch.zeros(self.n_designs, 3, 3).to(self.device)
         jac[:, 0, :].uniform_(-1, 1)
@@ -119,12 +128,6 @@ class ThreeDoFParallelLegDesign(designer.Design):
             points = [tuple(sorted(list(point))) for point in points]
             self.points_of_links.append(points)
 
-        self.joints_of_links = []
-        for n in self.g.nodes:
-            joints = list(self.g.edges(n))
-            joints = [tuple(sorted(list(joint))) for joint in joints]
-            self.joints_of_links.append(joints)
-
     def _eval(self):
         c = dimensions.populate(self.p0, self.c_empty)
 
@@ -152,13 +155,14 @@ class ThreeDoFParallelLegDesign(designer.Design):
             ),
             dim=-1,
         )
-
-        v_ankle_toe = p[self.toe_key] - p[self.ankle_key]
-        theta_ankle = torch.atan2(v_ankle_toe[:, :, 1], v_ankle_toe[:, :, 0])
-        loss_theta_ankle_error = torch.mean(
-            (theta_ankle - self.theta_ankle_d)**2,
+        loss_toe_error = torch.mean(
+            torch.sum(
+                (p[self.toe_key] - self.p_toe_d)**2,
+                dim=-1,
+            ),
             dim=-1,
         )
+        loss_foot_error = (loss_ankle_error + loss_toe_error) / 2
 
         centroid_link_length = []
         for points_of_link in self.points_of_links:
@@ -182,55 +186,47 @@ class ThreeDoFParallelLegDesign(designer.Design):
             cos, self.cos_max,
         ) - self.cos_max
 
+        p_ankle = p[self.ankle_key]
+        rot_y = -p_ankle
+        rot_y = rot_y / torch.linalg.norm(rot_y, dim=-1, keepdim=True)
+        rot_x = torch.stack([rot_y[:, :, 1], -rot_y[:, :, 0]], dim=-1)
+        rot = torch.stack([rot_x, rot_y], dim=-2)
         p_other = torch.stack(
-            [v for k, v in p.items() if k != self.ankle_key and k != self.toe_key],
+            [
+                v for k, v in p.items()
+                if k != self.ankle_key and k != self.toe_key
+            ],
             dim=2,
         )
-        p_ankle = p[self.ankle_key]
-        angle = (
-            -torch.atan2(p_ankle[:, :, 1], p_ankle[:, :, 0]) +
-            -np.pi / 2
-        )
-        rot = torch.stack([
-            torch.cos(angle), -torch.sin(angle),
-            torch.sin(angle), torch.cos(angle)
-        ], dim=2).reshape(*angle.shape, 2, 2)
         p_other = torch.matmul(
             rot.unsqueeze(2), p_other.unsqueeze(-1),
         ).squeeze(-1)
         p_ankle = torch.matmul(
             rot, p_ankle.unsqueeze(-1),
         ).squeeze(-1)
-        output_clearance = (
-            p_ankle[:, :, 1] - torch.amin(p_other[:, :, :, 1], dim=-1)
+        ankle_clearance = (
+            p_ankle[:, :, 1] -
+            torch.amin(p_other[:, :, :, 1], dim=-1)
         )
-        output_clearance = torch.amax(output_clearance, dim=-1)
-        loss_output_clearance = torch.maximum(
-            output_clearance, -self.output_clearance_min,
-        ) - -self.output_clearance_min
+        ankle_clearance = torch.amax(ankle_clearance, dim=-1)
+        loss_ankle_clearance = torch.maximum(
+            ankle_clearance, -self.ankle_clearance_min,
+        ) - -self.ankle_clearance_min
 
-        x_max = torch.amax(p_other[:, :, :, 0], dim=(1, 2))
-        x_min = torch.amin(p_other[:, :, :, 0], dim=(1, 2))
-        width = x_max - x_min
+        x_max = torch.amax(p_other[:, :, :, 0], dim=-1)
+        x_min = torch.amin(p_other[:, :, :, 0], dim=-1)
+        width = torch.amax(x_max - x_min, dim=-1)
         loss_width = torch.maximum(
             width, self.width_max,
         ) - self.width_max
 
-        loss_ankle_toe_length = torch.abs(
-            torch.linalg.norm(
-                v_ankle_toe[:, 0, :], dim=-1,
-            ) - self.l_ankle_toe,
-        )
-
         loss_itemized = torch.stack(
             [
-                loss_ankle_error,
-                loss_theta_ankle_error,
+                loss_foot_error,
                 loss_total_link_length,
                 loss_cos,
-                loss_output_clearance,
+                loss_ankle_clearance,
                 loss_width,
-                loss_ankle_toe_length,
             ],
             dim=1,
         )
@@ -243,11 +239,7 @@ class ThreeDoFParallelLegDesign(designer.Design):
         p_ankle = self.p[self.ankle_key][d_index].detach().cpu().numpy()
         p_toe = self.p[self.toe_key][d_index].detach().cpu().numpy()
         p_ankle_d = self.p_ankle_d.detach().cpu().numpy()
-        theta_ankle_d = self.theta_ankle_d.detach().cpu().numpy()
-        p_toe_d = np.array([
-            self.l_ankle_toe * np.cos(theta_ankle_d),
-            self.l_ankle_toe * np.sin(theta_ankle_d),
-        ]).T + p_ankle_d
+        p_toe_d = self.p_toe_d.detach().cpu().numpy()
 
         plt.plot(p_ankle[:, 0], p_ankle[:, 1], '.b', lw=1)
         plt.plot(p_toe[:, 0], p_toe[:, 1], '2b', lw=1)
@@ -258,13 +250,11 @@ class ThreeDoFParallelLegDesign(designer.Design):
         print(
             f"design: {d_index}, "
             f"l: {self.loss[d_index]:.4f}, "
-            f"l_ae: {self.loss_weighted[d_index][0]:.4f}, "
-            f"l_tae: {self.loss_weighted[d_index][1]:.4f}, "
-            f"l_tll: {self.loss_weighted[d_index][2]:.4f}, "
-            f"l_cos: {self.loss_weighted[d_index][3]:.4f}, "
-            f"l_oc: {self.loss_weighted[d_index][4]:.4f}, "
-            f"l_w: {self.loss_weighted[d_index][5]:.4f}, "
-            f"l_atl: {self.loss_weighted[d_index][6]:.4f}"
+            f"l_fe: {self.loss_weighted[d_index][0]:.4f}, "
+            f"l_tll: {self.loss_weighted[d_index][1]:.4f}, "
+            f"l_cos: {self.loss_weighted[d_index][2]:.4f}, "
+            f"l_ac: {self.loss_weighted[d_index][3]:.4f}, "
+            f"l_w: {self.loss_weighted[d_index][4]:.4f}"
         )
         jac = (
             self.jac_scaled[d_index] / self.jac_scale
